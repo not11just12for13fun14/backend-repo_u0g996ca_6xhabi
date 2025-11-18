@@ -1,48 +1,91 @@
 """
-Database Schemas
+Database Schemas for Rent It
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
+Each Pydantic model represents a collection in MongoDB. The collection name is the
+lowercase class name (e.g., User -> "user").
 
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+These schemas are used for validation in API endpoints and by the database viewer.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, conlist
+from typing import List, Optional, Literal
+from datetime import date
 
-# Example schemas (replace with your own):
+# -----------------------------
+# Core Schemas
+# -----------------------------
+
+RoleType = Literal["landlord", "tenant"]
+RoomType = Literal["private_room", "shared_room", "entire_flat"]
+
+class Location(BaseModel):
+    lat: float = Field(..., ge=-90, le=90, description="Latitude")
+    lng: float = Field(..., ge=-180, le=180, description="Longitude")
+    address: Optional[str] = Field(None, description="Human readable address")
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
 class User(BaseModel):
-    """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
-    """
-    name: str = Field(..., description="Full name")
-    email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+    name: str
+    email: EmailStr
+    role: RoleType
+    avatar_url: Optional[HttpUrl] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    verified: bool = False
 
-class Product(BaseModel):
-    """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
-    """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+class Listing(BaseModel):
+    landlord_id: str = Field(..., description="Owner user id")
+    title: str
+    description: str
+    photos: List[HttpUrl] = Field(default_factory=list)
+    video_url: Optional[HttpUrl] = None
+    room_type: RoomType
+    amenities: List[str] = Field(default_factory=list)
+    house_rules: List[str] = Field(default_factory=list)
+    price: float = Field(..., ge=0, description="Base price in local currency")
+    price_unit: Literal["night", "week", "month"]
+    location: Location
+    available_now: bool = False
+    availability_dates: List[date] = Field(default_factory=list, description="Specific dates available")
 
-# Add your own schemas here:
-# --------------------------------------------------
+class Booking(BaseModel):
+    listing_id: str
+    tenant_id: str
+    start_date: date
+    end_date: date
+    status: Literal["requested", "accepted", "declined", "cancelled", "completed"] = "requested"
+    instant: bool = False
+    payment_reference: Optional[str] = None
+
+class Message(BaseModel):
+    listing_id: str
+    sender_id: str
+    receiver_id: str
+    content: str
+    read: bool = False
+
+class Review(BaseModel):
+    booking_id: str
+    reviewer_id: str
+    reviewee_id: str
+    rating: int = Field(..., ge=1, le=5)
+    comment: Optional[str] = None
+
+class SavedSearch(BaseModel):
+    tenant_id: str
+    name: str
+    query: dict
+    alerts_enabled: bool = True
+
+class VerificationRequest(BaseModel):
+    user_id: str
+    type: Literal["id", "property_ownership"]
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    document_urls: conlist(HttpUrl, min_length=1) = Field(..., description="Links to uploaded documents")
 
 # Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+# 1) Read these via GET /schema
+# 2) Use them for document validation
+# 3) Handle CRUD when applicable
