@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,22 +75,73 @@ def test_database():
 
 
 # -----------------------------
-# Users
+# Users & Auth Sync
 # -----------------------------
+
+class AuthSyncPayload(BaseModel):
+    supabase_user_id: str
+    email: str
+    name: str
+    role: str  # "landlord" | "tenant"
+    avatar_url: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+
+
+@app.post("/auth/sync")
+def auth_sync(payload: AuthSyncPayload):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+
+    coll = db[collection_name(User)]
+    existing = coll.find_one({"supabase_user_id": payload.supabase_user_id})
+
+    user_doc = {
+        "name": payload.name,
+        "email": payload.email,
+        "role": payload.role,
+        "avatar_url": payload.avatar_url,
+        "phone": payload.phone,
+        "bio": payload.bio,
+        "verified": False,
+        "supabase_user_id": payload.supabase_user_id,
+        "updated_at": datetime.utcnow(),
+    }
+
+    if existing:
+        coll.update_one({"_id": existing["_id"]}, {"$set": user_doc})
+        user_id = str(existing["_id"])
+    else:
+        # insert new
+        user_doc["created_at"] = datetime.utcnow()
+        res = coll.insert_one(user_doc)
+        user_id = str(res.inserted_id)
+
+    doc = coll.find_one({"_id": res.inserted_id}) if not existing else coll.find_one({"_id": existing["_id"]})
+    if not doc:
+        raise HTTPException(status_code=500, detail="Failed to create or fetch user")
+
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@app.get("/users")
+def list_users(role: Optional[str] = None, supabase_user_id: Optional[str] = None):
+    filt = {}
+    if role:
+        filt["role"] = role
+    if supabase_user_id:
+        filt["supabase_user_id"] = supabase_user_id
+    docs = get_documents(collection_name(User), filt)
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+    return docs
+
 
 @app.post("/users", status_code=201)
 def create_user(user: User):
     user_id = create_document(collection_name(User), user)
     return {"id": user_id, **user.model_dump()}
-
-
-@app.get("/users")
-def list_users(role: Optional[str] = None):
-    filt = {"role": role} if role else {}
-    docs = get_documents(collection_name(User), filt)
-    for d in docs:
-        d["id"] = str(d.pop("_id"))
-    return docs
 
 
 # -----------------------------

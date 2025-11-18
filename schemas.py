@@ -34,6 +34,7 @@ class User(BaseModel):
     phone: Optional[str] = None
     bio: Optional[str] = None
     verified: bool = False
+    supabase_user_id: Optional[str] = Field(None, description="Supabase auth user id")
 
 class Listing(BaseModel):
     landlord_id: str = Field(..., description="Owner user id")
